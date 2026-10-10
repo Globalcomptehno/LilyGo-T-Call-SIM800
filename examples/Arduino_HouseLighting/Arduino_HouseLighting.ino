@@ -5,8 +5,9 @@
   на каждом одна и та же прошивка, отличается только номер устройства (DEVICE_ID).
 
   На каждом устройстве:
-  - 8 каналов ШИМ через PCA9685 (I2C) — диммирование 0-100 %, плавное
-    включение/выключение, гамма-коррекция;
+  - 8 каналов ШИМ на 8-канальный MOSFET-модуль (прямо с GPIO) или через
+    PCA9685 (I2C) — диммирование 0-100 %, плавное включение/выключение,
+    гамма-коррекция;
   - автоматическое включение на закате и выключение на рассвете (расчёт по
     координатам, интернет для этого не нужен), смещения в минутах,
     ночной режим (после заданного часа яркость снижается до N %);
@@ -21,9 +22,9 @@
 
 // ===== Выберите свою плату =====
 // #define SIM800L_IP5306_VERSION_20190610
-// #define SIM800L_AXP192_VERSION_20200327
+#define SIM800L_AXP192_VERSION_20200327
 // #define SIM800C_AXP192_VERSION_20200609
-#define SIM800L_IP5306_VERSION_20200811
+// #define SIM800L_IP5306_VERSION_20200811
 
 // Номер устройства (угла) 1..4 — прошейте каждую плату со своим номером
 // (можно поменять и позже в веб-настройках)
@@ -48,10 +49,33 @@
 #define SerialMon Serial
 #define SerialAT  Serial1
 
-// ===== Выходы: PCA9685 на шине I2C платы (SDA 21, SCL 22, общая с PMU) =====
-#define NCH          8                      // каналов на устройство (до 16 на один PCA9685)
+// ===== Выходы =====
+// 0 — входы 8-канального MOSFET-модуля подключены прямо к GPIO платы (LIGHT_PINS)
+// 1 — через PCA9685 на шине I2C платы (SDA 21, SCL 22, общая с PMU)
+#define USE_PCA9685  0
+#define NCH          8                      // каналов на устройство
+
+#if !USE_PCA9685
+// Каналы 1..8. Подобраны так, чтобы не мешать модему, PMU, PSRAM и загрузке:
+//  - GPIO 2 и 15 — загрузочные: при старте на них должен быть низкий уровень.
+//    У MOSFET-модулей вход обычно подтянут к GND — это то, что нужно
+//    (если подтяжки нет — резистор 10 кОм вход->GND);
+//  - GPIO 13 — ещё и синий светодиод платы, он будет светиться вместе с каналом 5;
+//  - GPIO 32 — ещё и DTR модема; модем его не использует (AT+CSCLK=0).
+#if defined(SIM800C_AXP192_VERSION_20200609)
+// GPIO25 = питание модема, 33 = RI модема; GPIO12 загрузочный — обязательно подтяжка к GND
+static const uint8_t LIGHT_PINS[NCH] = {18, 19, 14, 15, 2, 13, 32, 12};
+#elif defined(SIM800L_IP5306_VERSION_20190610)
+static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 32, 33}; // у этой версии нет DTR/RI
+#else
+static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 2, 32};  // SIM800L AXP192 / IP5306 20200811
+#endif
+#define PWM_BITS     12
+#else
 #define PCA9685_ADDR 0x40
-#define PWM_FREQ     1000                   // Гц, 24..1526
+#endif
+
+#define PWM_FREQ     1000                   // Гц; для модулей с оптронами (PC817) лучше 200-500
 #define PWM_MAX      4095
 #define PWM_INVERT   0                      // 1 — если драйвер включается низким уровнем
 #define FADE_MS      2000                   // время плавного перехода 0 -> 100 %
@@ -195,6 +219,45 @@ void saveRuntimeIfDirty()
 // ШИМ-выходы
 // ---------------------------------------------------------------------------
 
+uint32_t levelToDuty(float pct)
+{
+    uint32_t duty = 0;
+    if (pct > 0) {
+        duty = (uint32_t)lroundf(powf(pct / 100.0f, GAMMA) * PWM_MAX);
+        if (duty == 0) {
+            duty = 1;
+        }
+    }
+    return PWM_INVERT ? PWM_MAX - duty : duty;
+}
+
+#if !USE_PCA9685
+
+void pwmWrite(int i, float pct)
+{
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(LIGHT_PINS[i], levelToDuty(pct));
+#else
+    ledcWrite(i, levelToDuty(pct));
+#endif
+}
+
+void pwmBegin()
+{
+    for (int i = 0; i < NCH; i++) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+        ledcAttach(LIGHT_PINS[i], PWM_FREQ, PWM_BITS);
+#else
+        ledcSetup(i, PWM_FREQ, PWM_BITS);
+        ledcAttachPin(LIGHT_PINS[i], i);
+#endif
+        pwmWrite(i, 0);
+    }
+    pcaOk = true;
+}
+
+#else
+
 void pcaWriteReg(uint8_t reg, uint8_t val)
 {
     Wire.beginTransmission(PCA9685_ADDR);
@@ -205,16 +268,7 @@ void pcaWriteReg(uint8_t reg, uint8_t val)
 
 void pwmWrite(int i, float pct)
 {
-    uint32_t duty = 0;
-    if (pct > 0) {
-        duty = (uint32_t)lroundf(powf(pct / 100.0f, GAMMA) * PWM_MAX);
-        if (duty == 0) {
-            duty = 1;
-        }
-    }
-    if (PWM_INVERT) {
-        duty = PWM_MAX - duty;
-    }
+    uint32_t duty = levelToDuty(pct);
     // LEDn_ON = 0, LEDn_OFF = duty; бит 4 старшего байта — "полностью вкл/выкл"
     uint16_t on = 0, off = duty;
     if (duty == 0) {
@@ -252,6 +306,8 @@ void pwmBegin()
         pwmWrite(i, 0);
     }
 }
+
+#endif
 
 // Плавно ведём текущую яркость к целевой
 void fadeStep()
@@ -685,6 +741,7 @@ void modemBegin()
         atCmd("AT+CLTS=1");
         atCmd("AT&W");
     }
+    atCmd("AT+CSCLK=0");                    // DTR (GPIO32) не управляет сном — пин занят каналом
     atCmd("AT+CMGF=1");                     // текстовый режим SMS
     atCmd("AT+CSCS=\"GSM\"");
     atCmd("AT+CNMI=2,2,0,0,0");             // новые SMS сразу в порт, без сохранения
@@ -1067,12 +1124,13 @@ void setup()
 
     loadConfig();
     setupPMU();                             // заодно запускает Wire на пинах I2C платы
-    pwmBegin();
     applyTimezone();
 
 #if USE_MODEM
     modemBegin();
 #endif
+    // после модема: setupModem() перенастраивает GPIO светодиода платы (он же канал 5)
+    pwmBegin();
 
     wifiBegin();
     webBegin();

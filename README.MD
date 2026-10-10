@@ -13,7 +13,7 @@
 | [SIM800C AXP192 20200609](./doc/SIM800C_AXP192.MD) | [Product link](https://www.aliexpress.com/item/4001274909689.html) |    [Schematic](./schematic/LilyGo-SIM800C-20200630.pdf)     |   ✅    |        ⭐⭐⭐        |
 
 ## Projects
-- [House lighting: 4 corners × 8 dimmable channels, sunset/sunrise schedule, web + SMS control](./examples/Arduino_HouseLighting) (RU)
+- [House lighting: 4 boards × 8 MOSFET channels, sunset/sunrise schedule, web + SMS control](./examples/Arduino_HouseLighting) (RU)
 
 ## Datasheet
 - [SIM800 AT Command](./datasheet/sim800_series_at_command_manual_v1.01.pdf)
