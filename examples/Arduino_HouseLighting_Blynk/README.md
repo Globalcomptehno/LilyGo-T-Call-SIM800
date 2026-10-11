@@ -76,19 +76,11 @@ Blynk считает каждую отправку значения с плат�
 
 ## Настройка скетча
 
-В начале `Arduino_HouseLighting_Blynk.ino`:
-
-```cpp
-#define DEVICE_ID   1                        // 1..4 — свой для каждой платы
-#define BLYNK_TEMPLATE_ID   "TMPL..."        // из Blynk.Console
-#define BLYNK_TEMPLATE_NAME "House Light"
-static const char *AUTH_TOKENS[4] = { "...", "...", "...", "..." };  // токены 4 устройств
-const char APN[] = "internet";               // APN вашего оператора
-#define HOME_LAT    55.7558                  // координаты дома
-#define HOME_LON    37.6173
-```
-
-Токены всех 4 плат лежат в одном файле, плата берёт свой по `DEVICE_ID`.
+1. Скопируйте `secrets.example.h` в **`secrets.h`** (в той же папке) и заполните его:
+   Template ID/Name, 4 токена устройств, APN оператора, координаты дома.
+   `secrets.h` внесён в `.gitignore`: токены не попадут на GitHub.
+2. В `Arduino_HouseLighting_Blynk.ino` перед прошивкой каждой платы поставьте её номер:
+   `#define DEVICE_ID 1` (2, 3, 4). Плата сама возьмёт свой токен.
 
 ## Библиотеки
 

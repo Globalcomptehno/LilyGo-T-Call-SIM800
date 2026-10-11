@@ -32,24 +32,9 @@
 // ===== Номер платы (угла) 1..4 — для каждой платы свой =====
 #define DEVICE_ID   1
 
-// ===== Blynk: шаблон и токены 4 устройств (Blynk.Console -> Devices -> Device Info) =====
-#define BLYNK_TEMPLATE_ID   "TMPLxxxxxxxx"
-#define BLYNK_TEMPLATE_NAME "House Light"
-static const char *AUTH_TOKENS[4] = {
-    "TOKEN_DEVICE_1",
-    "TOKEN_DEVICE_2",
-    "TOKEN_DEVICE_3",
-    "TOKEN_DEVICE_4",
-};
-
-// ===== GPRS: APN вашего оператора =====
-const char APN[]       = "internet";
-const char GPRS_USER[] = "";
-const char GPRS_PASS[] = "";
-
-// ===== Координаты дома (одинаковые для всех 4 плат) =====
-#define HOME_LAT    55.7558
-#define HOME_LON    37.6173
+// ===== Ключи Blynk, APN и координаты — в secrets.h =====
+// Скопируйте secrets.example.h в secrets.h и заполните. secrets.h не попадает в git.
+#include "secrets.h"
 
 #define BLYNK_PRINT Serial
 #define BLYNK_HEARTBEAT 120                 // реже пинги — меньше трафика (пинги не считаются сообщениями)
