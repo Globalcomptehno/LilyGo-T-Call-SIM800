@@ -92,7 +92,8 @@ static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 2, 32};  // SIM8
 #define PWM_INVERT  0
 #define GAMMA       2.2f
 
-#define TELEMETRY_MS   (60UL * 60 * 1000)   // напряжения и сигнал — раз в час
+#define TELEMETRY_MS   (60UL * 60 * 1000)   // сигнал GSM — раз в час
+#define VOLTS_MS       (60UL * 1000)        // напряжения — раз в минуту, если изменились от 0.1 В
 #define TIME_SYNC_MS   (6UL * 60 * 60 * 1000)
 #define NET_RETRY_MS   30000UL
 #define NET_REBOOT_MS  (15UL * 60 * 1000)   // нет связи 15 мин — перезапуск модема
@@ -477,6 +478,7 @@ void powerLoop()
     }
     last = millis();
 
+    readVoltages();
     PowerState p = readPower();
     if (!p.valid) {
         return;
@@ -620,27 +622,50 @@ void publishState()
         publish(VP_SUN, polar ? String(polar < 0 ? "полярная ночь" : "полярный день")
                 : fmtTime(sunriseT) + " / " + fmtTime(sunsetT));
     }
-    if (battV > 0) publish(VP_BATT, String(battV, 2));
-    if (vbusV > 0) publish(VP_VBUS, String(vbusV, 2));
-    if (acinV > 0) publish(VP_ACIN, String(acinV, 2));
+#ifdef HAS_AXP192
+    // 0.00 тоже отправляем: так видно, что внешнее питание пропало
+    publish(VP_BATT, String(battV, 1));
+    publish(VP_VBUS, String(vbusV, 1));
+    publish(VP_ACIN, String(acinV, 1));
+#endif
     if (csq >= 0)  publish(VP_CSQ, String(csq));
     publish(VP_RESET, resetText);           // меняется только при перезагрузке
 }
 
-// Напряжения и сигнал: обновляем раз в час, и только при заметном изменении
+// Напряжения: замер каждые 2 с из powerLoop(). Сглаживаем, чтобы просадки от модема
+// не уходили в Blynk; показание обновляем раз в минуту и только при изменении от 0.1 В.
+void readVoltages()
+{
+#ifdef HAS_AXP192
+    static float b = -1, u = 0, a = 0;
+    float nb = axp.getBattVoltage() / 1000.0f;
+    float nu = axp.getVbusVoltage() / 1000.0f;
+    float na = axp.getAcinVoltage() / 1000.0f;
+    if (b < 0) {
+        b = nb, u = nu, a = na;             // первый замер — без сглаживания
+    }
+    b += (nb - b) * 0.3f;
+    u  = nu < 1.0f ? 0 : u + (nu - u) * 0.5f;   // питание пропало — сразу 0, без «хвоста»
+    a  = na < 1.0f ? 0 : a + (na - a) * 0.5f;
+    static uint32_t lastShow = 0;
+    if (lastShow && millis() - lastShow < VOLTS_MS) {
+        return;                             // показания обновляем раз в минуту
+    }
+    lastShow = millis();
+    auto upd = [](float &shown, float v) {
+        if (fabsf(v - shown) >= 0.1f) {
+            shown = v;
+        }
+    };
+    upd(battV, b);
+    upd(vbusV, u);
+    upd(acinV, a);
+#endif
+}
+
+// Сигнал GSM: раз в час, и только при заметном изменении
 void readTelemetry()
 {
-    auto changed = [](float a, float b) {
-        return fabsf(a - b) >= 0.1f;
-    };
-#if defined(SIM800L_AXP192_VERSION_20200327) || defined(SIM800C_AXP192_VERSION_20200609)
-    float b = axp.getBattVoltage() / 1000.0f;
-    float u = axp.getVbusVoltage() / 1000.0f;
-    float a = axp.getAcinVoltage() / 1000.0f;
-    if (changed(b, battV)) battV = b;
-    if (changed(u, vbusV)) vbusV = u;
-    if (changed(a, acinV)) acinV = a;
-#endif
     if (!modemOn) {
         return;
     }
@@ -786,6 +811,7 @@ void setup()
     Blynk.config(modem, AUTH_TOKENS[DEVICE_ID - 1]);
     lastOnline = millis();
     computeTargets();
+    readVoltages();
     readTelemetry();
 }
 
