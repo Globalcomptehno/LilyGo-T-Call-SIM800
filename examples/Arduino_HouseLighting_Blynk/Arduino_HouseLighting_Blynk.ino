@@ -93,7 +93,7 @@ static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 2, 32};  // SIM8
 #define PWM_INVERT  0
 #define GAMMA       2.2f
 
-#define TELEMETRY_MS   (60UL * 60 * 1000)   // сигнал GSM — раз в час
+#define TELEMETRY_MS   (60UL * 1000)        // сигнал GSM — раз в минуту
 #define VOLTS_MS       (60UL * 1000)        // напряжения — раз в минуту, если изменились от 0.1 В
 #define TIME_SYNC_MS   (6UL * 60 * 60 * 1000)
 #define NET_RETRY_MS   30000UL
@@ -709,14 +709,18 @@ void readVoltages()
 #endif
 }
 
-// Сигнал GSM: раз в час, и только при заметном изменении
+// Сигнал GSM: раз в минуту, в Blynk — только при изменении от 3 единиц.
+// 99 — «неизвестно», так модем отвечает сразу после регистрации; такие замеры пропускаем.
 void readTelemetry()
 {
-    if (!modemOn) {
+    if (!modemOn || !modem.isNetworkConnected()) {
         return;
     }
     int q = modem.getSignalQuality();
-    if (q != 99 && abs(q - csq) >= 3) {
+    if (q <= 0 || q > 31) {
+        return;
+    }
+    if (csq < 0 || abs(q - csq) >= 3) {
         csq = q;
     }
 }
