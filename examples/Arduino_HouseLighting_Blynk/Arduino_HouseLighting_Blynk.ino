@@ -76,7 +76,7 @@ TinyGsm modem(SerialAT);
 #define VP_CSQ         V19  // уровень сигнала GSM 0..31                   (label)
 #define VP_RESET       V20  // причина последней перезагрузки             (label)
 #define VP_BATT_PCT    V21  // заряд аккумулятора, %                       (label)
-#define VP_SELFTEST    V22  // итог самопроверки: OK / ВНИМАНИЕ / ОШИБКА   (label)
+#define VP_SELFTEST    V22  // итог самопроверки: OK / ⚠ замечание / ❌ ошибка (label)
 #define VP_COUNT       23
 
 // ===== Выходы на 8-канальный MOSFET-модуль =====
@@ -252,13 +252,13 @@ void restartWith(const char *ev)
 const char *resetReasonText(esp_reset_reason_t r)
 {
     switch (r) {
-    case ESP_RST_POWERON:   return "включение питания";
-    case ESP_RST_BROWNOUT:  return "просадка питания (brownout)";
+    case ESP_RST_POWERON:   return "питание";
+    case ESP_RST_BROWNOUT:  return "просадка (brownout)";
     case ESP_RST_TASK_WDT:
     case ESP_RST_INT_WDT:
     case ESP_RST_WDT:       return "зависание (watchdog)";
-    case ESP_RST_PANIC:     return "программный сбой";
-    case ESP_RST_SW:        return "программная перезагрузка";
+    case ESP_RST_PANIC:     return "сбой";
+    case ESP_RST_SW:        return "программно";
     case ESP_RST_EXT:       return "кнопка RST";
     case ESP_RST_DEEPSLEEP: return "выход из сна";
     default:                return "неизвестно";
@@ -277,7 +277,7 @@ void loadResetLog()
         resetText += ": " + ev;
     }
     if (lastP.length()) {
-        resetText += ", АКБ до этого " + lastP;
+        resetText += ", АКБ " + lastP;
     }
     SerialMon.println("Причина перезагрузки: " + resetText);
 }
@@ -514,7 +514,7 @@ void powerLoop()
         deepSeen = true;
     }
     if (deepSeen && p.ext) {
-        restartWith("вернулось внешнее питание после разряда АКБ");
+        restartWith("5 В после разряда");
     }
     if (modemOn && lowCnt >= BATT_SAMPLES) {
         SerialMon.println("АКБ " + p.text + " без внешнего питания — выключаю модем, свет работает по часам");
@@ -772,34 +772,35 @@ void selfTest()
     esp_task_wdt_reset();
 
     String err, warn;
+    // Коротко: надпись в Blynk узкая, шрифт у неё не меняется. ❌ — ошибка, ⚠ — замечание
     auto add = [](String &list, const String &msg) {
         if (list.length()) {
-            list += "; ";
+            list += ", ";
         }
         list += msg;
     };
     if (!pmu) {
-        add(err, "нет связи с контроллером питания");
+        add(err, "нет PMU");
     }
     if (!modemOn) {
-        add(warn, "модем выключен: низкий заряд");
+        add(warn, "модем выкл: АКБ");
     } else if (!at) {
-        add(err, "модем не отвечает");
+        add(err, "модем молчит");
     } else if (!sim) {
-        add(err, "SIM не найдена");
+        add(err, "нет SIM");
     } else if (!net) {
-        add(err, "нет сети GSM");
+        add(err, "нет сети");
     } else if (!gprs) {
         add(err, "нет GPRS");
     }
     if (modemOn && csq > 0 && csq < CSQ_WEAK) {
-        add(warn, "слабый сигнал " + String(csq));
+        add(warn, "сигнал " + String(csq));
     }
     if (!timeOk) {
-        add(err, "нет времени с вышки");
+        add(err, "нет времени");
     }
     if (p.valid && !p.ext) {
-        add(warn, "нет внешнего питания");
+        add(warn, "нет 5 В");
         if (battPct >= 0 && battPct <= BATT_WARN_PCT) {
             add(warn, "АКБ " + String(battPct) + " %");
         }
@@ -810,9 +811,9 @@ void selfTest()
     }
 #endif
     if (err.length()) {
-        selfTestText = "ОШИБКА: " + err + (warn.length() ? "; " + warn : "");
+        selfTestText = "❌ " + err + (warn.length() ? " ⚠ " + warn : "");
     } else if (warn.length()) {
-        selfTestText = "ВНИМАНИЕ: " + warn;
+        selfTestText = "⚠ " + warn;
     } else {
         selfTestText = "OK";
     }

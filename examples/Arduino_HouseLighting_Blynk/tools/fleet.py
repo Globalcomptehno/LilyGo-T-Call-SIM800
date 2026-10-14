@@ -27,9 +27,9 @@ def check(dev, token):
     if not online:
         problems.append("офлайн")
     st = v.get("selftest") or ""
-    if st.startswith("ОШИБКА"):
+    if "❌" in st:
         problems.append(st)
-    elif st.startswith("ВНИМАНИЕ"):
+    elif "⚠" in st:
         warnings.append(st)
     elif not st:
         warnings.append("нет итога самопроверки (старая прошивка?)")
