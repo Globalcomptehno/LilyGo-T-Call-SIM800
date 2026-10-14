@@ -75,7 +75,8 @@ TinyGsm modem(SerialAT);
 #define VP_ACIN        V18  // напряжение входа 5V, В                      (label)
 #define VP_CSQ         V19  // уровень сигнала GSM 0..31                   (label)
 #define VP_RESET       V20  // причина последней перезагрузки             (label)
-#define VP_COUNT       21
+#define VP_BATT_PCT    V21  // заряд аккумулятора, %                       (label)
+#define VP_COUNT       22
 
 // ===== Выходы на 8-канальный MOSFET-модуль =====
 #define NCH 8
@@ -142,6 +143,7 @@ int      lastSunDay = -1;
 bool     isDark     = false;
 
 float    battV = 0, vbusV = 0, acinV = 0;
+int      battPct = -1;                      // заряд АКБ, %; -1 — ещё не измерен
 int      csq   = -1;
 
 bool     modemOn    = false;
@@ -627,15 +629,45 @@ void publishState()
     publish(VP_BATT, String(battV, 1));
     publish(VP_VBUS, String(vbusV, 1));
     publish(VP_ACIN, String(acinV, 1));
+#else
+    // IP5306 напряжений не измеряет: в USB V только «есть 5 В / нет» (5.0 / 0.0)
+    if (battPct >= 0) {
+        publish(VP_VBUS, String(vbusV, 1));
+    }
 #endif
+    if (battPct >= 0) {
+        publish(VP_BATT_PCT, String(battPct));
+    }
     if (csq >= 0)  publish(VP_CSQ, String(csq));
     publish(VP_RESET, resetText);           // меняется только при перезагрузке
 }
 
-// Напряжения: замер каждые 2 с из powerLoop(). Сглаживаем, чтобы просадки от модема
-// не уходили в Blynk; показание обновляем раз в минуту и только при изменении от 0.1 В.
+// Заряд Li-ion по напряжению, % (примерно; во время зарядки показывает больше)
+int voltsToPct(float v)
+{
+    static const float tbl[][2] = {
+        {3.30f, 0}, {3.50f, 10}, {3.60f, 20}, {3.70f, 40}, {3.80f, 60},
+        {3.90f, 75}, {4.00f, 85}, {4.10f, 95}, {4.20f, 100},
+    };
+    const int n = sizeof(tbl) / sizeof(tbl[0]);
+    if (v <= tbl[0][0]) {
+        return 0;
+    }
+    for (int i = 1; i < n; i++) {
+        if (v <= tbl[i][0]) {
+            float k = (v - tbl[i - 1][0]) / (tbl[i][0] - tbl[i - 1][0]);
+            int   p = (int)lroundf(tbl[i - 1][1] + k * (tbl[i][1] - tbl[i - 1][1]));
+            return (p + 2) / 5 * 5;         // шаг 5 %, чтобы не дёргалось
+        }
+    }
+    return 100;
+}
+
+// Питание: замер каждые 2 с из powerLoop(). Сглаживаем, чтобы просадки от модема
+// не уходили в Blynk; показание обновляем раз в минуту и только при заметном изменении.
 void readVoltages()
 {
+    static uint32_t lastShow = 0;
 #ifdef HAS_AXP192
     static float b = -1, u = 0, a = 0;
     float nb = axp.getBattVoltage() / 1000.0f;
@@ -647,7 +679,6 @@ void readVoltages()
     b += (nb - b) * 0.3f;
     u  = nu < 1.0f ? 0 : u + (nu - u) * 0.5f;   // питание пропало — сразу 0, без «хвоста»
     a  = na < 1.0f ? 0 : a + (na - a) * 0.5f;
-    static uint32_t lastShow = 0;
     if (lastShow && millis() - lastShow < VOLTS_MS) {
         return;                             // показания обновляем раз в минуту
     }
@@ -660,6 +691,21 @@ void readVoltages()
     upd(battV, b);
     upd(vbusV, u);
     upd(acinV, a);
+    int pct = (axp.isBatteryConnect() && b > 2.5f) ? voltsToPct(b) : 0;
+    if (battPct < 0 || abs(pct - battPct) >= 5) {
+        battPct = pct;
+    }
+#elif defined(IP5306_ADDR)
+    if (lastShow && millis() - lastShow < VOLTS_MS) {
+        return;
+    }
+    PowerState p = readPower();
+    if (!p.valid) {
+        return;                             // IP5306 без I2C — показать нечего
+    }
+    lastShow = millis();
+    battPct  = p.text.toInt();              // readPower() для IP5306 отдаёт "75 %"
+    vbusV    = p.ext ? 5.0f : 0.0f;
 #endif
 }
 
