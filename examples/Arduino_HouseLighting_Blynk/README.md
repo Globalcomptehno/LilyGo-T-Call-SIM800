@@ -87,6 +87,7 @@ Blynk считает каждую отправку значения с плат�
 | V19 | GSM signal | Integer | 0…31 | Label |
 | V20 | Last reset | String | | Label |
 | V21 | Battery % | Integer | 0…100 | Label |
+| V22 | Self-test | String | | Label |
 
 Важно:
 - У слайдеров в настройках виджета включите **«Send values on release only»**
@@ -113,6 +114,60 @@ Blynk считает каждую отправку значения с плат�
 - **AXP202X_Library** — https://github.com/lewisxhe/AXP202X_Library (ZIP).
 
 Плата в Arduino IDE: **ESP32 Wrover Module**.
+
+## Проверка
+
+### Самопроверка на плате (V22)
+
+Раз в минуту и сразу после подключения к Blynk плата проверяет себя и пишет итог в V22:
+`OK`, `ВНИМАНИЕ: …` (работает, но есть замечание) или `ОШИБКА: …`.
+
+| Проверка | Ошибка | Предупреждение |
+|---|---|---|
+| Контроллер питания AXP192 / IP5306 отвечает | нет связи с контроллером питания | |
+| Модем, SIM, сеть, GPRS | модем не отвечает / SIM не найдена / нет сети GSM / нет GPRS | модем выключен: низкий заряд |
+| Сигнал | | слабый сигнал (меньше 10 из 31) |
+| Время с вышки | нет времени с вышки | |
+| Питание | | нет внешнего питания, АКБ 20 % и ниже, нет АКБ |
+
+В монитор порта плата пишет те же данные строкой `SELFTEST {...}`.
+
+### Все платы одной командой — `tools/fleet.py`
+
+```bash
+python3 tools/fleet.py
+```
+
+Без подключения к компьютеру опрашивает 4 устройства через Blynk и печатает таблицу: связь, сигнал,
+заряд, 5 В, статус, самопроверка, а ниже — список проблем (❌ ошибка, ⚠️ замечание).
+Код выхода 1 при ошибках — можно запускать по расписанию. Токены берутся из `secrets.h`.
+Сервер Blynk — `fra1.blynk.cloud`, другой задаётся переменной `BLYNK_SERVER`.
+
+### Прошивка и проверка платы — `tools/bench.py`
+
+```bash
+python3 tools/bench.py
+```
+
+Подключили плату по USB — скрипт определяет её по MAC (`tools/boards.json`), собирает прошивку
+с нужным `DEVICE_ID`, прошивает, читает лог, проверяет самопроверку и Blynk и печатает итог.
+Отключили, подключили следующую — всё повторяется. `--no-flash` — только проверка, `--once` — одна плата.
+
+Нужно один раз: `pip3 install pyserial esptool`, `arduino-cli`, библиотеки из раздела «Библиотеки»
+и ESP32 core **2.0.17** в отдельной папке (на 3.x эти платы падают при старте):
+
+```bash
+mkdir -p ~/.arduino-tcall && cat > ~/.arduino-tcall/arduino-cli.yaml <<EOF
+board_manager:
+  additional_urls: [https://espressif.github.io/arduino-esp32/package_esp32_index.json]
+directories:
+  data: $HOME/.arduino-tcall/data
+  downloads: $HOME/.arduino-tcall/downloads
+  user: $HOME/Documents/Arduino
+EOF
+arduino-cli --config-file ~/.arduino-tcall/arduino-cli.yaml core update-index
+arduino-cli --config-file ~/.arduino-tcall/arduino-cli.yaml core install esp32:esp32@2.0.17
+```
 
 ## Подключение MOSFET-модуля
 

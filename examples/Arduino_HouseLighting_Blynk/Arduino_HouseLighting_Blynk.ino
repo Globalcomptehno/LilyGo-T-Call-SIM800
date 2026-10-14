@@ -76,7 +76,8 @@ TinyGsm modem(SerialAT);
 #define VP_CSQ         V19  // уровень сигнала GSM 0..31                   (label)
 #define VP_RESET       V20  // причина последней перезагрузки             (label)
 #define VP_BATT_PCT    V21  // заряд аккумулятора, %                       (label)
-#define VP_COUNT       22
+#define VP_SELFTEST    V22  // итог самопроверки: OK / ВНИМАНИЕ / ОШИБКА   (label)
+#define VP_COUNT       23
 
 // ===== Выходы на 8-канальный MOSFET-модуль =====
 #define NCH 8
@@ -95,6 +96,8 @@ static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 2, 32};  // SIM8
 
 #define TELEMETRY_MS   (60UL * 1000)        // сигнал GSM — раз в минуту
 #define VOLTS_MS       (60UL * 1000)        // напряжения — раз в минуту, если изменились от 0.1 В
+#define CSQ_WEAK       10                   // сигнал ниже — предупреждение в самопроверке
+#define BATT_WARN_PCT  20                   // заряд ниже без внешнего питания — предупреждение
 #define TIME_SYNC_MS   (6UL * 60 * 60 * 1000)
 #define NET_RETRY_MS   30000UL
 #define NET_REBOOT_MS  (15UL * 60 * 1000)   // нет связи 15 мин — перезапуск модема
@@ -144,6 +147,8 @@ bool     isDark     = false;
 
 float    battV = 0, vbusV = 0, acinV = 0;
 int      battPct = -1;                      // заряд АКБ, %; -1 — ещё не измерен
+String   selfTestText;                      // итог самопроверки (V22)
+bool     selfTestDue = false;               // запустить самопроверку в loop() (после подключения к Blynk)
 int      csq   = -1;
 
 bool     modemOn    = false;
@@ -640,6 +645,9 @@ void publishState()
     }
     if (csq >= 0)  publish(VP_CSQ, String(csq));
     publish(VP_RESET, resetText);           // меняется только при перезагрузке
+    if (selfTestText.length()) {
+        publish(VP_SELFTEST, selfTestText); // уходит только при смене итога
+    }
 }
 
 // Заряд Li-ion по напряжению, % (примерно; во время зарядки показывает больше)
@@ -730,7 +738,91 @@ BLYNK_CONNECTED()
     // Без syncAll: плата — источник правды. Досылаем только то, что изменилось
     // (после перезагрузки платы — один раз всё, ~20 сообщений).
     SerialMon.println("Blynk подключен");
+    selfTestDue = true;                     // AT-команды не шлём из обработчика Blynk — сделаем в loop()
     publishState();
+}
+
+// ---------------------------------------------------------------------------
+// Самопроверка: раз в минуту и сразу после подключения к Blynk.
+// Итог — в V22, подробности — строкой SELFTEST {...} в монитор порта (её читает tools/bench.py).
+// ---------------------------------------------------------------------------
+
+void selfTest()
+{
+    bool ok;
+    bool pmu = false;
+#if defined(HAS_AXP192)
+    i2cRead((uint8_t)AXP192_SLAVE_ADDRESS, 0x00, ok);
+    pmu = ok;
+#elif defined(IP5306_ADDR)
+    i2cRead(IP5306_ADDR, 0x70, ok);
+    pmu = ok;
+#endif
+    PowerState p = readPower();
+
+    bool at = false, sim = false, net = false, gprs = false;
+    if (modemOn) {
+        at = modem.testAT(1000);
+        if (at) {
+            sim  = modem.getSimStatus() == SIM_READY;
+            net  = sim && modem.isNetworkConnected();
+            gprs = net && modem.isGprsConnected();
+        }
+    }
+    esp_task_wdt_reset();
+
+    String err, warn;
+    auto add = [](String &list, const String &msg) {
+        if (list.length()) {
+            list += "; ";
+        }
+        list += msg;
+    };
+    if (!pmu) {
+        add(err, "нет связи с контроллером питания");
+    }
+    if (!modemOn) {
+        add(warn, "модем выключен: низкий заряд");
+    } else if (!at) {
+        add(err, "модем не отвечает");
+    } else if (!sim) {
+        add(err, "SIM не найдена");
+    } else if (!net) {
+        add(err, "нет сети GSM");
+    } else if (!gprs) {
+        add(err, "нет GPRS");
+    }
+    if (modemOn && csq > 0 && csq < CSQ_WEAK) {
+        add(warn, "слабый сигнал " + String(csq));
+    }
+    if (!timeOk) {
+        add(err, "нет времени с вышки");
+    }
+    if (p.valid && !p.ext) {
+        add(warn, "нет внешнего питания");
+        if (battPct >= 0 && battPct <= BATT_WARN_PCT) {
+            add(warn, "АКБ " + String(battPct) + " %");
+        }
+    }
+#ifdef HAS_AXP192
+    if (pmu && !axp.isBatteryConnect()) {
+        add(warn, "нет АКБ");
+    }
+#endif
+    if (err.length()) {
+        selfTestText = "ОШИБКА: " + err + (warn.length() ? "; " + warn : "");
+    } else if (warn.length()) {
+        selfTestText = "ВНИМАНИЕ: " + warn;
+    } else {
+        selfTestText = "OK";
+    }
+
+    SerialMon.printf("SELFTEST {\"dev\":%d,\"pmu\":%d,\"at\":%d,\"sim\":%d,\"net\":%d,\"gprs\":%d,"
+                     "\"blynk\":%d,\"csq\":%d,\"time\":%d,\"ext\":%d,\"batt\":%.2f,\"pct\":%d,"
+                     "\"sun\":\"%s / %s\",\"modem\":%d,\"result\":\"%s\"}\n",
+                     DEVICE_ID, pmu, at, sim, net, gprs, Blynk.connected(), csq, timeOk, p.valid ? p.ext : -1,
+                     battV, battPct, fmtTime(sunriseT).c_str(), fmtTime(sunsetT).c_str(), modemOn,
+                     selfTestText.c_str());
 }
 
 // Все записи из приложения
@@ -863,6 +955,7 @@ void setup()
     computeTargets();
     readVoltages();
     readTelemetry();
+    selfTest();
 }
 
 void loop()
@@ -879,9 +972,11 @@ void loop()
     }
 
     static uint32_t lastTelemetry = 0;
-    if (millis() - lastTelemetry >= TELEMETRY_MS) {
+    if (selfTestDue || millis() - lastTelemetry >= TELEMETRY_MS) {
         lastTelemetry = millis();
+        selfTestDue   = false;
         readTelemetry();
+        selfTest();
     }
 
     static uint32_t lastTimeSync = 0;
