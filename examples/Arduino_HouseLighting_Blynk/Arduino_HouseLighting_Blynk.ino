@@ -85,6 +85,11 @@ TinyGsm modem(SerialAT);
 static const uint8_t LIGHT_PINS[NCH] = {18, 19, 14, 15, 2, 13, 32, 12};
 #elif defined(SIM800L_IP5306_VERSION_20190610)
 static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 32, 33};
+#elif DEVICE_ID == 4
+// Плата 4: GPIO19 не работает — канал 2 перенесён на GPIO12.
+// GPIO12 загрузочный: при включении на нём должен быть низкий уровень
+// (подтяжка входа модуля к GND, иначе плата не стартует).
+static const uint8_t LIGHT_PINS[NCH] = {18, 12, 25, 14, 13, 15, 2, 32};
 #else
 static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 2, 32};  // SIM800L AXP192 / IP5306 20200811
 #endif
