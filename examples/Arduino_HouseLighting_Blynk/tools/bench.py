@@ -29,6 +29,7 @@ import serial
 from common import SKETCH_DIR, blynk_online, blynk_values, load_boards, load_tokens
 
 FQBN = "esp32:esp32:esp32wrover"
+UPLOAD_SPEED = 460800       # на 921600 прошивка обрывается (Unable to verify flash chip connection)
 TOOLCHAIN = os.path.expanduser("~/.arduino-tcall")
 CLI_CFG = os.path.join(TOOLCHAIN, "arduino-cli.yaml")
 BUILD_ROOT = os.path.join(TOOLCHAIN, "build")
@@ -117,8 +118,8 @@ def build(dev):
 
 def upload(port, build_dir):
     log("Прошивка...")
-    r = subprocess.run(["arduino-cli", "--config-file", CLI_CFG, "upload", "-p", port, "--fqbn", FQBN,
-                        "--input-dir", build_dir], capture_output=True, text=True)
+    r = subprocess.run(["arduino-cli", "--config-file", CLI_CFG, "upload", "-p", port,
+                        "--fqbn", f"{FQBN}:UploadSpeed={UPLOAD_SPEED}", "--input-dir", build_dir], capture_output=True, text=True)
     if r.returncode != 0 or "Hash of data verified" not in r.stdout + r.stderr:
         log((r.stdout + r.stderr)[-2000:])
         return False
