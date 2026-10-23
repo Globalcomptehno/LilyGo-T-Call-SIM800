@@ -85,11 +85,6 @@ TinyGsm modem(SerialAT);
 static const uint8_t LIGHT_PINS[NCH] = {18, 19, 14, 15, 2, 13, 32, 12};
 #elif defined(SIM800L_IP5306_VERSION_20190610)
 static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 32, 33};
-#elif DEVICE_ID == 4
-// Плата 4: GPIO19 и GPIO12 не работают — канал 2 на GPIO3 (U0RXD).
-// GPIO3 связан с CP2104 через 470 Ом, приём Serial не используется;
-// pwmBegin() вызывается после SerialMon.begin() и забирает вывод под ШИМ.
-static const uint8_t LIGHT_PINS[NCH] = {18, 3, 25, 14, 13, 15, 2, 32};
 #else
 static const uint8_t LIGHT_PINS[NCH] = {18, 19, 25, 14, 13, 15, 2, 32};  // SIM800L AXP192 / IP5306 20200811
 #endif
