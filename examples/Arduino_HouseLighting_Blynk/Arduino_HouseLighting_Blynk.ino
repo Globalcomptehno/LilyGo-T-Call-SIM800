@@ -27,9 +27,9 @@
 #define DEVICE_ID   1
 
 // ===== Модель платы: выбирается по номеру =====
-// Плата №3 — с контроллером питания IP5306, остальные — с AXP192.
+// Платы №1 и №3 — с контроллером питания IP5306, №2 и №4 — с AXP192.
 // Другие варианты: SIM800L_IP5306_VERSION_20190610, SIM800C_AXP192_VERSION_20200609
-#if DEVICE_ID == 3
+#if DEVICE_ID == 1 || DEVICE_ID == 3
 #define SIM800L_IP5306_VERSION_20200811
 #else
 #define SIM800L_AXP192_VERSION_20200327
